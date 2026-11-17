@@ -1,7 +1,8 @@
 
 const axios = require('axios');
 
-const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
+const GEMINI_BASE_URL =
+  'https://generativelanguage.googleapis.com/v1beta/models';
 
 function getApiKey() {
   return process.env.GEMINI_API_KEY;
@@ -12,21 +13,23 @@ function getModel() {
 }
 
 function isApiConfigured() {
-  const key = getApiKey();
-  return Boolean(key && key.trim() !== '');
+  return Boolean(getApiKey() && getApiKey().trim());
 }
 
-// Common function to send requests to Gemini
-async function generateContent(contents, systemPrompt, maxOutputTokens = 1024, timeout = 45000) {
+async function generateContent(
+  contents,
+  systemPrompt,
+  maxOutputTokens = 1024,
+  timeout = 45000
+) {
   if (!isApiConfigured()) {
-    return null;
+    throw new Error('Gemini API key is not configured.');
   }
 
   const payload = {
     contents,
     generationConfig: {
       maxOutputTokens,
-      temperature: 0.7,
     },
   };
 
@@ -40,28 +43,27 @@ async function generateContent(contents, systemPrompt, maxOutputTokens = 1024, t
 
   const response = await axios.post(url, payload, {
     params: { key: getApiKey() },
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: { 'Content-Type': 'application/json' },
     timeout,
   });
 
-  const parts = response.data?.candidates?.[0]?.content?.parts || [];
+  const parts =
+    response.data?.candidates?.[0]?.content?.parts || [];
+
   const result = parts
     .map((part) => part.text || '')
     .join('')
     .trim();
 
   if (!result) {
-    throw new Error('Gemini returned an empty response. The image or request may have been blocked.');
+    throw new Error(
+      'Gemini returned an empty response. The request may have been blocked.'
+    );
   }
 
   return result;
 }
 
-/**
- * Send a text chat message to Gemini
- */
 async function chat(messages, systemPrompt) {
   const contents = messages.map((message) => ({
     role: message.role === 'assistant' ? 'model' : 'user',
@@ -71,51 +73,35 @@ async function chat(messages, systemPrompt) {
   return generateContent(contents, systemPrompt, 1024, 30000);
 }
 
-/**
- * Simplify text using Gemini
- */
 async function simplifyText(text, level, language) {
-  const levelInstructions = {
-    simple: 'Rewrite the following text using simpler language. Keep the same level of detail but use easier words and shorter sentences.',
-    'very-simple': 'Rewrite the following text in very simple language suitable for a 10-year-old. Use extremely common words, very short sentences, and avoid all jargon.',
-    'step-by-step': 'Convert the following text into a clear numbered step-by-step list. Each step should be a single simple action or idea.',
+  const levels = {
+    simple: 'Use simpler language and shorter sentences.',
+    'very-simple': 'Use very simple words and short sentences suitable for a 10-year-old.',
+    'step-by-step': 'Convert the text into a clear numbered step-by-step list.',
   };
 
-  const languageInstructions = {
+  const languages = {
     english: 'Respond in English.',
-    hindi: 'Respond in Hindi (Devanagari script).',
+    hindi: 'Respond in Hindi using Devanagari script.',
   };
 
-  const systemPrompt = `You are an expert at making complex information accessible to everyone. ${levelInstructions[level] || levelInstructions.simple} ${languageInstructions[language] || languageInstructions.english} Preserve all important meaning. Do not add information that was not in the original. If the text contains medical, legal, or financial information, add a brief disclaimer at the end that your simplification does not replace professional advice.`;
+  const systemPrompt = `You make complex information accessible to everyone. ${levels[level] || levels.simple} ${languages[language] || languages.english} Preserve the original meaning and do not invent information.`;
 
-  return chat([{ role: 'user', content: text }], systemPrompt);
+  return chat(
+    [{ role: 'user', content: text }],
+    systemPrompt
+  );
 }
 
-/**
- * Generate an image description using Gemini Vision
- */
 async function describeImage(imageBase64, mimeType) {
-  const prompt = `Please provide two descriptions of this image:
+  const prompt = `Describe this image for someone who cannot see it.
 
-1. SHORT DESCRIPTION: A concise 1-2 sentence overview of what the image shows.
-2. DETAILED DESCRIPTION: A thorough description covering:
-- Main objects, subjects, or people (describe actions and appearance, but do not identify specific individuals)
-- Setting and environment
-- Colors and lighting
-- Spatial relationships between elements
-- Any visible text that is legible
-- Overall mood or atmosphere
+Provide:
+SHORT: A concise 1-2 sentence description.
 
-Important guidelines:
-- Do not identify or name specific individuals
-- Do not make assumptions about sensitive personal characteristics
-- Note that this description is AI-generated and may not be fully accurate
-- Be descriptive and helpful for someone who cannot see the image
+DETAILED: Describe the main objects, people, actions, setting, colors, lighting, spatial relationships and readable text.
 
-Format your response exactly as:
-SHORT: [your short description]
-
-DETAILED: [your detailed description]`;
+Do not identify specific individuals or assume sensitive personal characteristics. Mention that AI descriptions may not be fully accurate.`;
 
   const contents = [{
     role: 'user',
@@ -133,25 +119,22 @@ DETAILED: [your detailed description]`;
   return generateContent(contents, null, 1024, 45000);
 }
 
-/**
- * Run the full accessibility workflow on an image
- */
 async function accessibilityWorkflow(imageBase64, mimeType) {
-  const prompt = `Analyze this image and provide a complete accessibility report with the following sections:
+  const prompt = `Analyze this image and provide a complete accessibility report.
 
 IMAGE DESCRIPTION:
-Describe what you see in the image including main subjects, setting, colors, and spatial layout. Do not identify specific individuals.
+Describe the main subjects, setting, colors and spatial layout. Do not identify specific individuals.
 
 VISIBLE TEXT:
-List any text visible in the image. If no text is visible, say "No readable text detected."
+List all readable text. If none is visible, say "No readable text detected."
 
 SIMPLIFIED SUMMARY:
-Provide a simplified, easy-to-read summary of the main content in this image using simple vocabulary and short sentences suitable for all reading levels.
+Explain the main content using simple vocabulary and short sentences.
 
 KEY INFORMATION:
-Extract the 3-5 most important pieces of information from this image in bullet points.
+Extract 3-5 important points in bullet form.
 
-Please format each section clearly with its header followed by the content.`;
+Use clear headings for all four sections.`;
 
   const contents = [{
     role: 'user',
