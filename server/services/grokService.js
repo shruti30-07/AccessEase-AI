@@ -1,51 +1,78 @@
+
 const axios = require('axios');
 
-const XAI_BASE_URL = 'https://api.x.ai/v1';
+const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 function getApiKey() {
-  return process.env.XAI_API_KEY;
+  return process.env.GEMINI_API_KEY;
 }
 
 function getModel() {
-  return process.env.XAI_MODEL || 'grok-2-vision-1212';
+  return process.env.GEMINI_MODEL || 'gemini-3.8-flash';
 }
 
 function isApiConfigured() {
   const key = getApiKey();
-  return key && key.trim() !== '' && key !== 'your_xai_api_key_here';
+  return Boolean(key && key.trim() !== '');
 }
 
-/**
- * Send a text chat message to Grok
- */
-async function chat(messages, systemPrompt) {
+// Common function to send requests to Gemini
+async function generateContent(contents, systemPrompt, maxOutputTokens = 1024, timeout = 45000) {
   if (!isApiConfigured()) {
-    return null; // Caller handles demo mode
+    return null;
   }
 
   const payload = {
-    model: getModel(),
-    messages: [
-      ...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []),
-      ...messages,
-    ],
-    max_tokens: 1024,
-    temperature: 0.7,
+    contents,
+    generationConfig: {
+      maxOutputTokens,
+      temperature: 0.7,
+    },
   };
 
-  const response = await axios.post(`${XAI_BASE_URL}/chat/completions`, payload, {
+  if (systemPrompt) {
+    payload.systemInstruction = {
+      parts: [{ text: systemPrompt }],
+    };
+  }
+
+  const url = `${GEMINI_BASE_URL}/${getModel()}:generateContent`;
+
+  const response = await axios.post(url, payload, {
+    params: { key: getApiKey() },
     headers: {
-      Authorization: `Bearer ${getApiKey()}`,
       'Content-Type': 'application/json',
     },
-    timeout: 30000,
+    timeout,
   });
 
-  return response.data.choices[0].message.content;
+  const parts = response.data?.candidates?.[0]?.content?.parts || [];
+  const result = parts
+    .map((part) => part.text || '')
+    .join('')
+    .trim();
+
+  if (!result) {
+    throw new Error('Gemini returned an empty response. The image or request may have been blocked.');
+  }
+
+  return result;
 }
 
 /**
- * Simplify text using Grok
+ * Send a text chat message to Gemini
+ */
+async function chat(messages, systemPrompt) {
+  const contents = messages.map((message) => ({
+    role: message.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: String(message.content || '') }],
+  }));
+
+  return generateContent(contents, systemPrompt, 1024, 30000);
+}
+
+/**
+ * Simplify text using Gemini
  */
 async function simplifyText(text, level, language) {
   const levelInstructions = {
@@ -65,31 +92,12 @@ async function simplifyText(text, level, language) {
 }
 
 /**
- * Generate an image description using Grok vision
+ * Generate an image description using Gemini Vision
  */
 async function describeImage(imageBase64, mimeType) {
-  if (!isApiConfigured()) {
-    return null;
-  }
-
-  const payload = {
-    model: getModel(),
-    messages: [
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'image_url',
-            image_url: {
-              url: `data:${mimeType};base64,${imageBase64}`,
-            },
-          },
-          {
-            type: 'text',
-            text: `Please provide two descriptions of this image:
+  const prompt = `Please provide two descriptions of this image:
 
 1. SHORT DESCRIPTION: A concise 1-2 sentence overview of what the image shows.
-
 2. DETAILED DESCRIPTION: A thorough description covering:
 - Main objects, subjects, or people (describe actions and appearance, but do not identify specific individuals)
 - Setting and environment
@@ -107,48 +115,29 @@ Important guidelines:
 Format your response exactly as:
 SHORT: [your short description]
 
-DETAILED: [your detailed description]`,
-          },
-        ],
+DETAILED: [your detailed description]`;
+
+  const contents = [{
+    role: 'user',
+    parts: [
+      {
+        inlineData: {
+          mimeType,
+          data: imageBase64,
+        },
       },
+      { text: prompt },
     ],
-    max_tokens: 1024,
-  };
+  }];
 
-  const response = await axios.post(`${XAI_BASE_URL}/chat/completions`, payload, {
-    headers: {
-      Authorization: `Bearer ${getApiKey()}`,
-      'Content-Type': 'application/json',
-    },
-    timeout: 45000,
-  });
-
-  return response.data.choices[0].message.content;
+  return generateContent(contents, null, 1024, 45000);
 }
 
 /**
  * Run the full accessibility workflow on an image
  */
 async function accessibilityWorkflow(imageBase64, mimeType) {
-  if (!isApiConfigured()) {
-    return null;
-  }
-
-  const payload = {
-    model: getModel(),
-    messages: [
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'image_url',
-            image_url: {
-              url: `data:${mimeType};base64,${imageBase64}`,
-            },
-          },
-          {
-            type: 'text',
-            text: `Analyze this image and provide a complete accessibility report with the following sections:
+  const prompt = `Analyze this image and provide a complete accessibility report with the following sections:
 
 IMAGE DESCRIPTION:
 Describe what you see in the image including main subjects, setting, colors, and spatial layout. Do not identify specific individuals.
@@ -162,23 +151,28 @@ Provide a simplified, easy-to-read summary of the main content in this image usi
 KEY INFORMATION:
 Extract the 3-5 most important pieces of information from this image in bullet points.
 
-Please format each section clearly with its header followed by the content.`,
-          },
-        ],
+Please format each section clearly with its header followed by the content.`;
+
+  const contents = [{
+    role: 'user',
+    parts: [
+      {
+        inlineData: {
+          mimeType,
+          data: imageBase64,
+        },
       },
+      { text: prompt },
     ],
-    max_tokens: 1500,
-  };
+  }];
 
-  const response = await axios.post(`${XAI_BASE_URL}/chat/completions`, payload, {
-    headers: {
-      Authorization: `Bearer ${getApiKey()}`,
-      'Content-Type': 'application/json',
-    },
-    timeout: 60000,
-  });
-
-  return response.data.choices[0].message.content;
+  return generateContent(contents, null, 1500, 60000);
 }
 
-module.exports = { chat, simplifyText, describeImage, accessibilityWorkflow, isApiConfigured };
+module.exports = {
+  chat,
+  simplifyText,
+  describeImage,
+  accessibilityWorkflow,
+  isApiConfigured,
+};
