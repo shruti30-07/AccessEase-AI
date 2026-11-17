@@ -6,6 +6,7 @@ const rateLimit = require('express-rate-limit');
 const aiRoutes = require('./routes/ai');
 
 const app = express();
+app.set('trust proxy', 1);
 const PORT = process.env.PORT || 3001;
 
 // CORS configuration - allow frontend dev server
