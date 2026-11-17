@@ -246,7 +246,12 @@ async function handleAccessibilityWorkflow(req, res) {
       isDemo: false,
     });
   } catch (error) {
-    console.error('Workflow error:', error.message);
+    console.error('Workflow error details:', {
+  message: error.message,
+  status: error.response?.status,
+  data: error.response?.data,
+  code: error.code,
+});
     if (error.response?.status === 401) {
       return res.status(401).json({ error: 'Invalid API key.' });
     }
