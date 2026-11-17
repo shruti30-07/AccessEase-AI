@@ -11,7 +11,10 @@ const PORT = process.env.PORT || 3001;
 // CORS configuration - allow frontend dev server
 app.use(
   cors({
-    origin: ['http://localhost:5173', 'http://localhost:3000', 'http://127.0.0.1:5173'],
+    origin: ['http://localhost:5173', 
+             'http://localhost:3000', 
+             'http://127.0.0.1:5173',
+             'https://accessease-frontend.onrender.com'],
     methods: ['GET', 'POST', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
   })
